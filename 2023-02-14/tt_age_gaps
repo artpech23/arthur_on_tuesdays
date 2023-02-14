@@ -1,0 +1,234 @@
+---
+title: "Hollywood Age Gaps"
+author: "Arthur Pecherskikh"
+date: "2023-02-14"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+**# Libraries & Data**
+
+```{r}
+# general:
+library(tidyverse)
+library(readr)
+
+# text manipulation:
+library(stringr)
+
+# ordering plotted variables:
+library(forcats)
+
+# over-written text:
+library(ggtext) 
+library(ggrepel)
+
+
+age_gaps <- read.csv("age_gaps.csv")
+```
+
+
+**# Data preparation**
+
+
+
+We need to create two subsets of the data in addition to the merged data frame as we will use them to construct different levels of the graph. The general idea of building *dumbell plot* using `ggplot` was taken from [this beautiful guide](https://r-graph-gallery.com/web-extended-dumbbell-plot-ggplot2.html).
+
+
+And yeah, I focused on Martin Scorsese movies only.
+
+```{r}
+####################################
+## subset focused on older actors ##
+####################################
+
+actor1 <- age_gaps %>% 
+  filter(director == "Martin Scorsese") %>% 
+  mutate(movie_name2 = str_c(movie_name, " (", release_year, ")"), ## add years to the titles
+         couple = str_c(actor_1_name, "-", actor_2_name)) %>% ## construct new names as some movies do repeat
+  select(movie_name2, couple, age_difference, actor_1_name, character_1_gender, actor_1_age) %>% 
+  rename(actor_name = actor_1_name,
+         character_gender = character_1_gender,
+         actor_age = actor_1_age)
+
+######################################
+## subset focused on younger actors ##
+######################################
+actor2 <- age_gaps %>% 
+  filter(director == "Martin Scorsese") %>% 
+  mutate(movie_name2 = str_c(movie_name, " (", release_year, ")"),
+         couple = str_c(actor_1_name, "-", actor_2_name)) %>%
+  select(movie_name2, couple, age_difference, actor_2_name, character_2_gender, actor_2_age) %>% 
+  rename(actor_name = actor_2_name,
+         character_gender = character_2_gender,
+         actor_age = actor_2_age)
+
+####################################################
+## data to draw differences between actors' ages: ##
+####################################################
+
+difs <- age_gaps %>% 
+  filter(director == "Martin Scorsese") %>% 
+  mutate(movie_name2 = str_c(movie_name, " (", release_year, ")"),
+         couple = str_c(actor_1_name, "-", actor_2_name)) %>% 
+  
+  mutate(diff2 = actor_2_age + (age_difference/2)) ## this we need to put the number in the middle of the line
+
+
+##################################
+## data to write actors' names: ##
+##################################
+captions <- difs %>% 
+  select(actor_1_name,
+         actor_1_age,
+         character_1_gender,
+         movie_name2,
+         age_difference,
+         couple) %>% 
+  rename(actor_name = actor_1_name,
+         actor_age = actor_1_age,
+         character_gender = character_1_gender) %>% 
+  
+  bind_rows(difs %>%
+              select(actor_2_name,
+                     actor_2_age,
+                     character_2_gender,
+                     movie_name2,
+                     couple,
+                     age_difference) %>%
+              rename(actor_name = actor_2_name,
+                     actor_age = actor_2_age,
+                     character_gender = character_2_gender))
+
+```
+
+
+**# Plotting**
+
+```{r}
+set.seed(8382)
+
+g <- actor1 %>% 
+  bind_rows(actor2) %>% 
+  ggplot() +
+  
+  #### first layer: ####
+  
+  geom_segment(data = actor2,
+               aes(y = actor_age,
+                   x = reorder(interaction(fct_reorder(movie_name2,
+                                               age_difference),
+                                   couple),
+                               age_difference),
+                   xend = reorder(interaction(fct_reorder(actor1$movie_name2,
+                                                  actor1$age_difference),
+                                      actor1$couple),
+                                  actor1$age_difference),
+                   yend = actor1$actor_age),
+               color = "grey70",
+               size = 1,
+               alpha = 0.4) +
+  
+  #### next layer: ####
+  
+  geom_point(aes(x = interaction(fct_reorder(movie_name2,
+                                             age_difference),
+                                 couple),
+                 y = actor_age,
+                 color = character_gender),
+             size = 1,
+             show.legend = F) +
+  
+  #### flip & captions: ####
+  
+  coord_flip() +
+  
+  labs(x = "",
+       y = "actors' age",
+       title = "<span style='font-size:12pt'>**Age gaps between love interests in Martin Scorsese movies**<br><span style='font-size:10pt'><span style='color: coral1;'>**female**</span> and <span style='color: #72A0C1;'>**male**</span> characters (as identified in each film)",
+       caption = "plotted by: **Arthur Pecherskikh** | github: @artpech23<br>Data from **Hollywood Age Gap** | *hollywoodagegap.com*<br>**#TidyTuesday**") +
+  
+  #### themes: ####
+
+  theme_minimal() +
+  theme(plot.caption = element_markdown(size = 6),
+        plot.title = element_markdown(),
+        axis.title = element_text(size = 8),
+        axis.text = element_text(size = 8),
+        axis.text.y = element_text(face = "italic")) +
+  
+  #### scales: ####
+
+  scale_color_manual(values = c("#72A0C1",
+                                "coral1")) +
+  
+  scale_x_discrete(labels = c("The Aviator (2004)",
+                              "The Departed (2006)",
+                              "Gangs of New York (2002)",
+                              "The Departed (2006)",
+                              "The Aviator (2004)",
+                              "Shutter Island (2010)",
+                              "The Aviator (2004)",
+                              "The Wolf of Wall Street (2013)",
+                              "Casino (1995)",
+                              "The Wolf of Wall Street (2013)",
+                              "Raging Bull (1980)",
+                              "The Color of Money (1986)",
+                              "The Departed (2006)")) +
+  
+  scale_y_continuous(limits = c(19, 70)) +
+  
+  #### text data (presented in the way I worked through): ####
+  
+  geom_text_repel(data = captions,
+            aes(label = paste(actor_name),
+                y = as.numeric(actor_age),
+                x = interaction(fct_reorder(movie_name2,
+                                            age_difference),
+                                couple),
+                color = character_gender),
+            size = 2,
+            show.legend = FALSE,
+            fontface = "bold",
+            direction = "x",
+            force = 5) +
+  
+  
+  geom_text(data = difs,
+            aes(label = paste("∆", age_difference),
+                y = diff2,
+                x = interaction(fct_reorder(movie_name2,
+                                            age_difference),
+                                couple)),
+            size = 3,
+            direction = "both",
+            fontface = "bold.italic")
+  
+g
+```
+
+
+
+Save:
+
+```{r}
+png("tidytuesday_scorsese.png",
+  width     = 9,
+  height    = 4,
+  units     = "in",
+  res       = 800,
+  pointsize = 4
+)
+print(g)
+dev.off()
+```
+
+
+I am bad at saving pictures and adjusting their sizes, so the result located at my github folder is not perfect. I will work on it in future! :)
+
+
+
